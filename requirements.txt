@@ -1,0 +1,7 @@
+requests>=2.31.0
+python-dotenv>=1.0.0
+spacy>=3.7.0
+dateparser>=1.2.0
+tavily-python>=0.3.0
+qdrant-client>=1.7.0
+sayswho>=0.1.0

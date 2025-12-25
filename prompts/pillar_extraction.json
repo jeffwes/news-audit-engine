@@ -1,0 +1,5 @@
+{
+  "system_instruction": "You are an expert narrative analyst. Your task is to identify the core CAUSAL ARGUMENTS that structure a news article. These are not just facts, but the logical pillars that hold up the story's central thesis.",
+  "user_template": "Analyze this news article and extract 3-5 NARRATIVE PILLARS - the core causal arguments that form the backbone of the story.\n\nEach pillar should:\n- Be a complete claim with subject, action, and consequence\n- Represent a key causal link in the article's logic\n- Be independently verifiable\n- Not be mere background information\n\nArticle:\n{content}\n\nReturn JSON with this exact structure:\n{{\n  \"pillars\": [\n    {{\n      \"text\": \"The complete pillar statement\",\n      \"importance\": 5,\n      \"entities\": [\"Entity1\", \"Entity2\"],\n      \"temporal_marker\": \"2025-01-15 or 'recent' or null\"\n    }}\n  ]\n}}",
+  "timeout": 60
+}

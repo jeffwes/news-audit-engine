@@ -1,0 +1,32 @@
+{
+  "auditor": {
+    "name": "The Auditor",
+    "role": "Logical consistency and emotional framing expert",
+    "focus_areas": [
+      "Internal logical consistency",
+      "Emotional manipulation via loaded language",
+      "Logical fallacies",
+      "Misleading framing techniques"
+    ]
+  },
+  "contextualist": {
+    "name": "The Contextualist",
+    "role": "Temporal logic and historical accuracy expert",
+    "focus_areas": [
+      "Temporal accuracy",
+      "Historical continuity",
+      "Event sequencing",
+      "Causal accuracy"
+    ]
+  },
+  "skeptic": {
+    "name": "The Skeptic",
+    "role": "Evidence quality and source credibility challenger",
+    "focus_areas": [
+      "Source credibility",
+      "Evidence sufficiency",
+      "Methodological weaknesses",
+      "Alternative explanations"
+    ]
+  }
+}
