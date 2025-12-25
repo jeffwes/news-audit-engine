@@ -26,6 +26,11 @@ class ConsensusProtocol:
                     "- Are claims internally consistent?\n"
                     "- Is emotional language used to influence rather than inform?\n"
                     "- Are there logical fallacies or misleading framing?\n\n"
+                    "CONFLICT CLASSIFICATION GUIDANCE:\n"
+                    "- factual_contradiction: Undermines credibility\n"
+                    "- position_evolution: If article reports a policy/position CHANGE and evidence shows "
+                    "the OLD position, this VALIDATES the change story (not a contradiction)\n"
+                    "- source_disagreement: Evaluate source quality\n\n"
                     "Evidence:\n{evidence}\n\n"
                     "Provide your assessment as JSON with keys: verdict, confidence, reasoning"
                 )
@@ -39,6 +44,13 @@ class ConsensusProtocol:
                     "- Are temporal claims accurate and properly contextualized?\n"
                     "- Does the narrative respect historical continuity?\n"
                     "- Are events presented in proper sequence with correct causality?\n\n"
+                    "CRITICAL - CONFLICT CLASSIFICATION:\n"
+                    "- Conflicts have been PRE-CLASSIFIED by the semantic judge\n"
+                    "- position_evolution means the article reports a CHANGE in position\n"
+                    "- If classification='position_evolution', finding evidence of the OLD position "
+                    "is STRONG VALIDATION that the reported change is real and newsworthy\n"
+                    "- DO NOT second-guess the classification - use it to inform your verdict\n"
+                    "- Only factual_contradiction indicates inaccuracy\n\n"
                     "Evidence:\n{evidence}\n\n"
                     "Provide your assessment as JSON with keys: verdict, confidence, reasoning"
                 )
@@ -52,6 +64,11 @@ class ConsensusProtocol:
                     "- Are the sources credible and authoritative?\n"
                     "- Is there sufficient evidence to support the verdict?\n"
                     "- What are the weaknesses in the available evidence?\n\n"
+                    "CONFLICT INTERPRETATION:\n"
+                    "- For position_evolution: If credible sources document BOTH the historical "
+                    "stance AND the new stance, this is strong evidence the change happened\n"
+                    "- The contradiction between old and new positions IS the story itself\n"
+                    "- For source_disagreement: Evaluate which sources are more authoritative\n\n"
                     "Evidence:\n{evidence}\n\n"
                     "Provide your assessment as JSON with keys: verdict, confidence, reasoning"
                 )
@@ -76,11 +93,15 @@ class ConsensusProtocol:
             response = self.gemini.generate_json(
                 prompt=prompt,
                 timeout=45,
-                temperature=0.7
+                temperature=0.2
             )
             
             if response.get("ok"):
                 verdict = response["data"]
+                # Handle case where data might be a list
+                if isinstance(verdict, list):
+                    print(f"Warning: Agent {agent_id} returned list, using first item")
+                    verdict = verdict[0] if verdict else {}
                 verdict["agent"] = agent_config["name"]
                 verdict["agent_id"] = agent_id
                 verdicts.append(verdict)
@@ -141,15 +162,21 @@ class ConsensusProtocol:
                 response = self.gemini.generate_json(
                     prompt=debate_prompt,
                     timeout=45,
-                    temperature=0.5  # Lower temp for deliberation
+                    temperature=0.2  # Lower temp for deliberation
                 )
                 
                 if response.get("ok"):
                     verdict = response["data"]
+                    # Handle case where data might be a list
+                    if isinstance(verdict, list):
+                        print(f"Warning: Agent {agent_id} returned list, using first item")
+                        verdict = verdict[0] if verdict else {}
                     verdict["agent"] = agent_config["name"]
                     verdict["agent_id"] = agent_id
                     verdict["turn"] = turn + 1
                     new_verdicts.append(verdict)
+                else:
+                    print(f"Agent {agent_id} debate turn {turn+1} failed: {response.get('error')}")
             
             current_verdicts = new_verdicts
         

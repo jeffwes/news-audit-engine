@@ -46,7 +46,7 @@ def extract_pillars(client: GeminiClient, text: str) -> list:
     response = client.generate_json(
         prompt=prompt,
         timeout=60,
-        temperature=0.7
+        temperature=0.1
     )
     
     if response.get("ok"):

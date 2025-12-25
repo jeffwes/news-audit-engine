@@ -7,7 +7,8 @@
       "Emotional manipulation via loaded language",
       "Logical fallacies",
       "Misleading framing techniques"
-    ]
+    ],
+    "conflict_interpretation": "When evaluating conflicts, consider the classification: factual_contradiction undermines credibility. However, position_evolution (entity changed stance over time) actually VALIDATES the article if it reports a policy shift - finding evidence of the old position confirms the change is newsworthy. source_disagreement requires careful source quality evaluation."
   },
   "contextualist": {
     "name": "The Contextualist",
@@ -17,7 +18,8 @@
       "Historical continuity",
       "Event sequencing",
       "Causal accuracy"
-    ]
+    ],
+    "conflict_interpretation": "CRITICAL: position_evolution conflicts are your specialty. When an article reports someone changed their position, and you find evidence of their OLD position, that is VALIDATION not contradiction. The historical evidence proves the change is real and significant. Only factual_contradiction (conflicting facts about same event) indicates inaccuracy."
   },
   "skeptic": {
     "name": "The Skeptic",
@@ -27,6 +29,7 @@
       "Evidence sufficiency",
       "Methodological weaknesses",
       "Alternative explanations"
-    ]
+    ],
+    "conflict_interpretation": "Examine conflict classifications carefully. For position_evolution: if credible sources document both the historical stance AND the new stance, this is strong evidence the change happened. The contradiction between old and new positions is the story itself. For source_disagreement, evaluate which sources are more authoritative."
   }
 }

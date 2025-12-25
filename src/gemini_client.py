@@ -15,7 +15,7 @@ class GeminiClient:
             raise ValueError("GEMINI_API_KEY must be set in environment or passed to constructor")
         
         self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
-        self.default_model = "gemini-2.5-flash-lite"
+        self.default_model = "gemini-3-flash-preview"
     
     def generate_json(
         self,
@@ -24,7 +24,8 @@ class GeminiClient:
         timeout: int = 60,
         system_instruction: Optional[str] = None,
         model: Optional[str] = None,
-        temperature: float = 0.7
+        temperature: float = 0.7,
+        thinking_level: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate JSON response from Gemini API.
@@ -34,8 +35,9 @@ class GeminiClient:
             schema: Optional JSON schema to constrain output
             timeout: Request timeout in seconds
             system_instruction: Optional system instruction
-            model: Model name (defaults to gemini-2.5-flash-lite)
+            model: Model name (defaults to gemini-3-flash-preview)
             temperature: Sampling temperature (0.0-2.0)
+            thinking_level: Thinking level for Gemini 3 models (minimal, low, medium, high)
             
         Returns:
             Dict with 'ok' (bool), 'data' (dict if successful), 'error' (str if failed)
@@ -58,6 +60,9 @@ class GeminiClient:
         
         if schema:
             payload["generationConfig"]["responseSchema"] = schema
+        
+        if thinking_level:
+            payload["thinkingConfig"] = {"thinkingLevel": thinking_level}
         
         try:
             response = requests.post(url, json=payload, timeout=timeout)

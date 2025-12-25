@@ -128,14 +128,21 @@ class SemanticJudge:
         # that indicates a conflict
         conflicts = []
         if confirming and adversarial:
-            conflicts.append({
+            conflict = {
                 "pillar": pillar_text[:100],
                 "conflict_type": "opposing_evidence",
                 "supporting_count": len(confirming),
                 "opposing_count": len(adversarial),
                 "supporting_sources": [h.payload.get("url") for h in confirming[:3]],
                 "opposing_sources": [h.payload.get("url") for h in adversarial[:3]]
-            })
+            }
+            
+            # Classify the conflict type
+            classification = self.classify_conflict_type(pillar_text, conflict)
+            conflict["classification"] = classification.get("classification", "source_disagreement")
+            conflict["classification_reasoning"] = classification.get("reasoning", "")
+            
+            conflicts.append(conflict)
         
         return conflicts
     
@@ -184,3 +191,66 @@ class SemanticJudge:
             "missing_facts": missing_facts,
             "total_consensus_facts": len(consensus_facts)
         }
+    
+    def classify_conflict_type(self, pillar_text: str, conflict: Dict[str, Any]) -> Dict[str, str]:
+        """
+        Classify a detected conflict into one of three types.
+        
+        Types:
+        - factual_contradiction: Mutually exclusive objective facts
+        - position_evolution: Entity changed stance over time (historical vs current)
+        - source_disagreement: Competing claims about same timeframe
+        
+        Args:
+            pillar_text: The narrative pillar being evaluated
+            conflict: Conflict dict with supporting_count, opposing_count
+            
+        Returns:
+            Dict with 'classification' and 'reasoning'
+        """
+        prompt = f"""Classify this narrative conflict.
+
+NARRATIVE CLAIM:
+{pillar_text}
+
+EVIDENCE CONFLICT:
+- {conflict['supporting_count']} sources support this claim
+- {conflict['opposing_count']} sources contradict this claim
+
+Classify as ONE of these types:
+
+A) factual_contradiction
+   - Mutually exclusive facts about the SAME event/timeframe
+   - Example: "Treaty signed March 15" vs "Treaty signed March 20"
+   - One source must be wrong
+
+B) position_evolution  
+   - Entity changed position/policy over time
+   - Example: Historical stance X vs new/current stance Y
+   - BOTH can be true if temporally separated
+   - Key indicators: "previously supported", "now proposes", "shifted from"
+   - Finding historical evidence that contradicts current claim actually VALIDATES a change story
+
+C) source_disagreement
+   - Different sources making different claims about SAME timeframe
+   - Neither is clearly historical vs current
+   - Requires evaluating source credibility
+
+CRITICAL: If the claim describes a NEW or CHANGED position, and opposing evidence shows the OLD position, classify as B (position_evolution).
+
+Return JSON: {{"classification": "factual_contradiction|position_evolution|source_disagreement", "reasoning": "2-3 sentence explanation"}}"""
+
+        response = self.gemini.generate_json(
+            prompt=prompt,
+            timeout=30,
+            temperature=0.1
+        )
+        
+        if response.get("ok"):
+            return response["data"]
+        else:
+            # Default to source_disagreement if classification fails
+            return {
+                "classification": "source_disagreement",
+                "reasoning": f"Classification failed: {response.get('error')}"
+            }
