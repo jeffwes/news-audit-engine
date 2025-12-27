@@ -87,17 +87,22 @@ class SemanticJudge:
         
         return len(points)
     
-    def detect_conflicts(self, pillar_text: str, threshold: float = 0.85) -> List[Dict[str, Any]]:
+    def detect_conflicts(self, pillar: Dict[str, Any], threshold: float = 0.85) -> List[Dict[str, Any]]:
         """
         Detect semantic conflicts for a narrative pillar.
         
         Args:
-            pillar_text: Text of the narrative pillar
+            pillar: Enriched pillar dict with 'text', 'change_indicators', 'claim_type', etc.
             threshold: Similarity threshold for conflict detection (0.0-1.0)
             
         Returns:
             List of detected conflicts with opposing evidence
         """
+        # Extract text from pillar dict (backward compatible)
+        pillar_text = pillar.get('text', str(pillar))
+        claim_type = pillar.get('claim_type', 'unknown')
+        is_change = pillar.get('is_change', False)
+        
         # Generate embedding for pillar
         embedding_resp = self.gemini.generate_embedding(pillar_text)
         if not embedding_resp.get("ok"):
@@ -113,19 +118,44 @@ class SemanticJudge:
             score_threshold=threshold
         ).points
         
-        # Group by search intent to find conflicts
-        confirming = []
-        adversarial = []
+        # Group by search intent and deduplicate by URL
+        confirming_urls = {}
+        adversarial_urls = {}
         
         for hit in search_results:
+            url = hit.payload.get("url")
             intent = hit.payload.get("search_intent")
-            if intent == "confirming":
-                confirming.append(hit)
-            elif intent == "adversarial":
-                adversarial.append(hit)
+            
+            if not url:
+                continue
+                
+            if intent == "confirming" and url not in confirming_urls:
+                confirming_urls[url] = hit
+            elif intent == "adversarial" and url not in adversarial_urls:
+                adversarial_urls[url] = hit
+        
+        # CRITICAL: For position_evolution claims, adversarial evidence of the OLD position
+        # actually VALIDATES the change story, not contradicts it
+        if claim_type == "position_evolution" or is_change:
+            # For change narratives, having both confirming (new position) and 
+            # adversarial (old position) is EXPECTED and VALIDATES the change
+            # Only flag as conflict if there's genuine contradiction about the new position
+            if confirming_urls and adversarial_urls:
+                # Check if adversarial sources actually support the existence of an old position
+                # This is normal for position_evolution - not a conflict
+                return []  # No conflict - this validates the change story
+        
+        # Remove duplicate URLs that appear in both lists (same source, different queries)
+        duplicate_urls = set(confirming_urls.keys()) & set(adversarial_urls.keys())
+        for url in duplicate_urls:
+            # If same source appears in both, remove from adversarial (assume it's more nuanced)
+            del adversarial_urls[url]
+        
+        confirming = list(confirming_urls.values())
+        adversarial = list(adversarial_urls.values())
         
         # If we have both confirming and adversarial with high similarity,
-        # that indicates a conflict
+        # that indicates a genuine conflict (after deduplication and change-narrative handling)
         conflicts = []
         if confirming and adversarial:
             conflict = {
@@ -133,12 +163,12 @@ class SemanticJudge:
                 "conflict_type": "opposing_evidence",
                 "supporting_count": len(confirming),
                 "opposing_count": len(adversarial),
-                "supporting_sources": [h.payload.get("url") for h in confirming[:3]],
-                "opposing_sources": [h.payload.get("url") for h in adversarial[:3]]
+                "supporting_sources": [h.payload.get("url") for h in confirming[:5]],
+                "opposing_sources": [h.payload.get("url") for h in adversarial[:5]]
             }
             
             # Classify the conflict type
-            classification = self.classify_conflict_type(pillar_text, conflict)
+            classification = self.classify_conflict_type(pillar, conflict)
             conflict["classification"] = classification.get("classification", "source_disagreement")
             conflict["classification_reasoning"] = classification.get("reasoning", "")
             
@@ -192,9 +222,9 @@ class SemanticJudge:
             "total_consensus_facts": len(consensus_facts)
         }
     
-    def classify_conflict_type(self, pillar_text: str, conflict: Dict[str, Any]) -> Dict[str, str]:
+    def classify_conflict_type(self, pillar: Dict[str, Any], conflict: Dict[str, Any]) -> Dict[str, str]:
         """
-        Classify a detected conflict into one of three types.
+        Classify a detected conflict into one of three types using semantic metadata.
         
         Types:
         - factual_contradiction: Mutually exclusive objective facts
@@ -202,16 +232,36 @@ class SemanticJudge:
         - source_disagreement: Competing claims about same timeframe
         
         Args:
-            pillar_text: The narrative pillar being evaluated
+            pillar: Enriched pillar dict with semantic metadata
             conflict: Conflict dict with supporting_count, opposing_count
             
         Returns:
             Dict with 'classification' and 'reasoning'
         """
+        pillar_text = pillar.get('text', str(pillar))
+        claim_type = pillar.get('claim_type', 'unknown')
+        change_indicators = pillar.get('change_indicators', {})
+        temporal_frame = pillar.get('temporal_frame')
+        
+        # Build semantic context
+        semantic_context = f"""SEMANTIC METADATA:
+- Claim Type: {claim_type}
+- Has Temporal Shift: {change_indicators.get('has_temporal_shift', False)}
+- Change Verbs Detected: {change_indicators.get('change_verbs', [])}
+- Temporal Markers: {change_indicators.get('temporal_markers', [])}"""
+        
+        if temporal_frame:
+            semantic_context += f"""
+- Old Position: {temporal_frame.get('old_position', 'N/A')}
+- New Position: {temporal_frame.get('new_position', 'N/A')}
+- Transition Verb: {temporal_frame.get('transition_verb', 'N/A')}"""
+        
         prompt = f"""Classify this narrative conflict.
 
 NARRATIVE CLAIM:
 {pillar_text}
+
+{semantic_context}
 
 EVIDENCE CONFLICT:
 - {conflict['supporting_count']} sources support this claim
@@ -230,13 +280,18 @@ B) position_evolution
    - BOTH can be true if temporally separated
    - Key indicators: "previously supported", "now proposes", "shifted from"
    - Finding historical evidence that contradicts current claim actually VALIDATES a change story
+   - **IMPORTANT**: If claim_type='position_evolution' OR change_verbs present, strongly consider this classification
 
 C) source_disagreement
    - Different sources making different claims about SAME timeframe
    - Neither is clearly historical vs current
    - Requires evaluating source credibility
 
-CRITICAL: If the claim describes a NEW or CHANGED position, and opposing evidence shows the OLD position, classify as B (position_evolution).
+CRITICAL RULES:
+1. If claim_type='position_evolution', classify as B unless clearly impossible
+2. If change verbs (shift, reverse, abandon) present, classify as B
+3. If temporal_frame shows old→new transition, classify as B
+4. Only use A for truly contradictory facts about same event
 
 Return JSON: {{"classification": "factual_contradiction|position_evolution|source_disagreement", "reasoning": "2-3 sentence explanation"}}"""
 

@@ -17,6 +17,7 @@ load_dotenv()
 
 from src.gemini_client import GeminiClient
 from src.ner_pipeline import NERPipeline
+from src.semantic_enrichment import SemanticEnrichment
 from src.search_portfolio import SearchPortfolio
 from src.semantic_judge import SemanticJudge
 from src.consensus_protocol import ConsensusProtocol
@@ -32,15 +33,55 @@ def extract_pillars(client: GeminiClient, text: str) -> list:
         text: Full article text
         
     Returns:
-        List of narrative pillar dicts
+        List of narrative pillar dicts with semantic context
     """
     prompt = (
-        "Analyze this news article and extract 3-5 NARRATIVE PILLARS - the core causal "
-        "arguments that form the backbone of the story. Each pillar should be a complete "
-        "claim with subject, action, and consequence.\n\n"
-        f"Article:\n{text[:8000]}\n\n"
-        "Return JSON with structure: "
-        '{"pillars": [{"text": "pillar statement", "importance": 1-5}]}'
+        "You are extracting FACT-CHECKABLE NARRATIVE PILLARS from a news article. "
+        "These pillars will be verified against historical evidence, so they must preserve "
+        "temporal context, change narratives, and entity attributions.\n\n"
+        
+        "EXTRACT 3-5 PILLARS that are:\n"
+        "1. VERIFIABLE: Specific claims that can be fact-checked\n"
+        "2. CONSEQUENTIAL: Important to the story's meaning\n"
+        "3. CONTEXTUALLY RICH: Include temporal markers and change language\n\n"
+        
+        "For each pillar, capture:\n"
+        "- TEMPORAL CONTEXT: When something happened, or if it represents a CHANGE from before\n"
+        "- CHANGE INDICATORS: If describing a shift, reversal, or evolution, use explicit language:\n"
+        "  * 'shifted from [X] to [Y]'\n"
+        "  * 'previously [X], now [Y]'\n"
+        "  * 'reversed position on [X]'\n"
+        "  * 'abandoned [X] in favor of [Y]'\n"
+        "- ENTITY ATTRIBUTION: WHO made the claim/took the action (with their role/title)\n"
+        "- SOURCE TYPE: Direct quote vs. reported/paraphrased vs. inferred\n"
+        "- CAUSAL CONTEXT: Why this happened (if stated in article)\n\n"
+        
+        "CRITICAL: If the article describes someone CHANGING their position:\n"
+        "- DO NOT just state the new position\n"
+        "- DO state: '[Entity] shifted from [old position] to [new position]'\n"
+        "- Include temporal markers: 'Previously... now...', 'Used to... but now...'\n\n"
+        
+        "BAD EXAMPLE (loses context): 'Zelensky proposes DMZ in eastern Ukraine'\n"
+        "GOOD EXAMPLE (preserves change): 'Zelensky shifted from demanding full territorial "
+        "integrity to proposing a demilitarized zone in Donetsk, marking a significant policy reversal'\n\n"
+        
+        f"ARTICLE:\n{text[:12000]}\n\n"
+        
+        "Return JSON:\n"
+        "{\n"
+        '  "pillars": [\n'
+        "    {\n"
+        '      "text": "Complete pillar statement with change language if applicable",\n'
+        '      "entity": "Primary actor (name + role)",\n'
+        '      "temporal_context": "When/timeline markers",\n'
+        '      "is_change": true/false,\n'
+        '      "old_position": "Previous stance (if is_change=true)",\n'
+        '      "new_position": "Current stance (if is_change=true)",\n'
+        '      "source_type": "direct_quote|reported|inferred",\n'
+        '      "importance": 1-5\n'
+        "    }\n"
+        "  ]\n"
+        "}"
     )
     
     response = client.generate_json(
@@ -101,6 +142,7 @@ def main():
         
         gemini = GeminiClient(api_key=gemini_api_key)
         ner = NERPipeline()
+        enrichment = SemanticEnrichment()
         search = SearchPortfolio(api_key=tavily_api_key, test_mode=test_mode)
         judge = SemanticJudge(gemini_client=gemini)
         consensus = ConsensusProtocol(gemini_client=gemini)
@@ -114,6 +156,9 @@ def main():
         
         tracker.update("Running two-stage NER pipeline...")
         enriched_pillars = ner.extract_pillars_with_entities(article_text, pillars)
+        
+        tracker.update("Enriching pillars with semantic metadata...")
+        enriched_pillars = enrichment.enrich_pillars(enriched_pillars)
         
         # In test mode, only use the highest importance pillar
         if test_mode and enriched_pillars:
@@ -141,7 +186,7 @@ def main():
         tracker.update("Detecting semantic conflicts...")
         all_conflicts = []
         for pillar in enriched_pillars:
-            conflicts = judge.detect_conflicts(pillar.get("text", ""))
+            conflicts = judge.detect_conflicts(pillar)  # Pass full enriched pillar dict
             all_conflicts.extend(conflicts)
         print(f"  → Detected {len(all_conflicts)} conflicts")
         tracker.complete_phase()
@@ -149,15 +194,47 @@ def main():
         # Layer 4: Consensus protocol
         tracker.start_phase("Layer 4: Consensus Protocol")
         
-        # Format evidence for agents
-        evidence_summary = (
-            f"NARRATIVE PILLARS:\n"
-            + "\n".join([f"- {p.get('text', '')}" for p in enriched_pillars[:5]])
-            + f"\n\nSEARCH RESULTS: {total_results} sources analyzed"
-            + f"\n\nCONFLICTS DETECTED: {len(all_conflicts)}"
-        )
+        # Format evidence for agents with full context
+        evidence_parts = ["NARRATIVE PILLARS:\n"]
+        for i, p in enumerate(enriched_pillars[:5], 1):
+            evidence_parts.append(f"\nPillar {i}:")
+            evidence_parts.append(f"  Text: {p.get('text', '')}")
+            evidence_parts.append(f"  Entity: {p.get('entity', 'Unknown')}")
+            evidence_parts.append(f"  Temporal Context: {p.get('temporal_context', 'N/A')}")
+            evidence_parts.append(f"  Claim Type: {p.get('claim_type', 'unknown')}")
+            if p.get('is_change'):
+                evidence_parts.append(f"  Is Position Change: YES")
+                evidence_parts.append(f"  Old Position: {p.get('old_position', 'N/A')}")
+                evidence_parts.append(f"  New Position: {p.get('new_position', 'N/A')}")
+            evidence_parts.append(f"  Source Type: {p.get('source_type', 'unknown')}")
+            evidence_parts.append(f"  Importance: {p.get('importance', 0)}/5")
         
-        result = consensus.run_full_protocol(evidence_summary)
+        evidence_parts.append(f"\n\nSEARCH RESULTS: {total_results} sources analyzed")
+        evidence_parts.append(f"\nCONFLICTS DETECTED: {len(all_conflicts)}\n")
+        
+        for i, conflict in enumerate(all_conflicts[:10], 1):
+            evidence_parts.append(f"\nConflict {i}:")
+            evidence_parts.append(f"  Pillar: {conflict.get('pillar', '')[:100]}...")
+            evidence_parts.append(f"  Type: {conflict.get('conflict_type', 'unknown')}")
+            evidence_parts.append(f"  Classification: {conflict.get('classification', 'unknown')}")
+            evidence_parts.append(f"  Supporting Sources: {conflict.get('supporting_count', 0)}")
+            if conflict.get('supporting_sources'):
+                for url in conflict['supporting_sources'][:3]:
+                    evidence_parts.append(f"    - {url}")
+            evidence_parts.append(f"  Opposing Sources: {conflict.get('opposing_count', 0)}")
+            if conflict.get('opposing_sources'):
+                for url in conflict['opposing_sources'][:3]:
+                    evidence_parts.append(f"    - {url}")
+            if conflict.get('classification_reasoning'):
+                evidence_parts.append(f"  Reasoning: {conflict['classification_reasoning']}")
+        
+        evidence_summary = "\n".join(evidence_parts)
+        
+        # Get current date for agent context
+        from datetime import datetime
+        current_date = datetime.now().strftime("%B %d, %Y")
+        
+        result = consensus.run_full_protocol(evidence_summary, current_date=current_date)
         tracker.complete_phase()
         
         # Print final verdict

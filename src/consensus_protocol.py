@@ -21,6 +21,7 @@ class ConsensusProtocol:
                 "name": "The Auditor",
                 "role": "Focuses on logical consistency, emotional framing, and loaded language.",
                 "prompt_template": (
+                    "CURRENT DATE: {current_date}\n\n"
                     "You are The Auditor. Analyze the following evidence for logical consistency, "
                     "emotional manipulation, and biased framing. Focus on:\n"
                     "- Are claims internally consistent?\n"
@@ -32,13 +33,19 @@ class ConsensusProtocol:
                     "the OLD position, this VALIDATES the change story (not a contradiction)\n"
                     "- source_disagreement: Evaluate source quality\n\n"
                     "Evidence:\n{evidence}\n\n"
-                    "Provide your assessment as JSON with keys: verdict, confidence, reasoning"
+                    "IMPORTANT: Your verdict MUST be exactly one of these labels:\n"
+                    "- Accurate: Claims are well-supported and properly contextualized\n"
+                    "- Misleading: Claims contain factual errors or misleading framing\n"
+                    "- Biased: Claims show clear bias but facts are not necessarily wrong\n"
+                    "- Inconclusive: Evidence is insufficient to make a determination\n\n"
+                    "Provide your assessment as JSON with keys: verdict (must be one of the above), confidence (0.0-1.0), reasoning"
                 )
             },
             "contextualist": {
                 "name": "The Contextualist",
                 "role": "Focuses on temporal logic and historical continuity.",
                 "prompt_template": (
+                    "CURRENT DATE: {current_date}\n\n"
                     "You are The Contextualist. Analyze the following evidence for temporal "
                     "logic and historical accuracy. Focus on:\n"
                     "- Are temporal claims accurate and properly contextualized?\n"
@@ -52,13 +59,19 @@ class ConsensusProtocol:
                     "- DO NOT second-guess the classification - use it to inform your verdict\n"
                     "- Only factual_contradiction indicates inaccuracy\n\n"
                     "Evidence:\n{evidence}\n\n"
-                    "Provide your assessment as JSON with keys: verdict, confidence, reasoning"
+                    "IMPORTANT: Your verdict MUST be exactly one of these labels:\n"
+                    "- Accurate: Claims are well-supported and properly contextualized\n"
+                    "- Misleading: Claims contain factual errors or misleading framing\n"
+                    "- Biased: Claims show clear bias but facts are not necessarily wrong\n"
+                    "- Inconclusive: Evidence is insufficient to make a determination\n\n"
+                    "Provide your assessment as JSON with keys: verdict (must be one of the above), confidence (0.0-1.0), reasoning"
                 )
             },
             "skeptic": {
                 "name": "The Skeptic",
                 "role": "Devil's advocate challenging evidence quality.",
                 "prompt_template": (
+                    "CURRENT DATE: {current_date}\n\n"
                     "You are The Skeptic. Challenge the quality and reliability of this evidence. "
                     "Focus on:\n"
                     "- Are the sources credible and authoritative?\n"
@@ -70,25 +83,40 @@ class ConsensusProtocol:
                     "- The contradiction between old and new positions IS the story itself\n"
                     "- For source_disagreement: Evaluate which sources are more authoritative\n\n"
                     "Evidence:\n{evidence}\n\n"
-                    "Provide your assessment as JSON with keys: verdict, confidence, reasoning"
+                    "IMPORTANT: Your verdict MUST be exactly one of these labels:\n"
+                    "- Accurate: Claims are well-supported and properly contextualized\n"
+                    "- Misleading: Claims contain factual errors or misleading framing\n"
+                    "- Biased: Claims show clear bias but facts are not necessarily wrong\n"
+                    "- Inconclusive: Evidence is insufficient to make a determination\n\n"
+                    "Provide your assessment as JSON with keys: verdict (must be one of the above), confidence (0.0-1.0), reasoning"
                 )
             }
         }
     
-    def gather_agent_verdicts(self, evidence: str) -> List[Dict[str, Any]]:
+    def gather_agent_verdicts(self, evidence: str, current_date: str = None) -> List[Dict[str, Any]]:
         """
         Gather initial verdicts from all agents.
         
         Args:
             evidence: Formatted evidence string containing pillars, conflicts, searches
+            current_date: Current date string for temporal context (e.g., "December 26, 2025")
             
         Returns:
             List of agent verdict dicts
         """
+        from datetime import datetime
+        
+        # Use provided date or default to today
+        if not current_date:
+            current_date = datetime.now().strftime("%B %d, %Y")
+        
         verdicts = []
         
         for agent_id, agent_config in self.agents.items():
-            prompt = agent_config["prompt_template"].format(evidence=evidence)
+            prompt = agent_config["prompt_template"].format(
+                evidence=evidence,
+                current_date=current_date
+            )
             
             response = self.gemini.generate_json(
                 prompt=prompt,
@@ -155,8 +183,13 @@ class ConsensusProtocol:
                     f"You are {agent_config['name']}. You previously assessed the evidence as: "
                     f"{current_verdict.get('verdict')} (confidence: {current_verdict.get('confidence')})\n\n"
                     f"Other agents have provided these assessments:\n{other_views}\n\n"
-                    f"Given their perspectives, do you maintain your verdict or change it? "
-                    f"Provide updated assessment as JSON with keys: verdict, confidence, reasoning, changed"
+                    f"Given their perspectives, do you maintain your verdict or change it?\n\n"
+                    f"IMPORTANT: Your verdict MUST be exactly one of these labels:\n"
+                    f"- Accurate: Claims are well-supported and properly contextualized\n"
+                    f"- Misleading: Claims contain factual errors or misleading framing\n"
+                    f"- Biased: Claims show clear bias but facts are not necessarily wrong\n"
+                    f"- Inconclusive: Evidence is insufficient to make a determination\n\n"
+                    f"Provide updated assessment as JSON with keys: verdict (must be one of the above), confidence (0.0-1.0), reasoning, changed (boolean)"
                 )
                 
                 response = self.gemini.generate_json(
@@ -182,6 +215,31 @@ class ConsensusProtocol:
         
         return current_verdicts
     
+    def _normalize_verdict(self, verdict: str) -> str:
+        """
+        Normalize verdict labels to standard categories.
+        
+        Args:
+            verdict: Raw verdict string from agent
+            
+        Returns:
+            Normalized verdict label
+        """
+        verdict_lower = verdict.lower().strip()
+        
+        # Map common variations to standard labels
+        if any(word in verdict_lower for word in ['accurate', 'valid', 'correct', 'sound', 'reliable']):
+            return "Accurate"
+        elif any(word in verdict_lower for word in ['misleading', 'inconsistent', 'false', 'incorrect', 'manipulative', 'deceptive']):
+            return "Misleading"
+        elif any(word in verdict_lower for word in ['biased', 'bias', 'slanted', 'partial']):
+            return "Biased"
+        elif any(word in verdict_lower for word in ['inconclusive', 'insufficient', 'unclear', 'unverified', 'speculative']):
+            return "Inconclusive"
+        else:
+            # Default to Inconclusive if unclear
+            return "Inconclusive"
+    
     def calculate_consensus(self, final_verdicts: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Calculate final consensus from agent verdicts.
@@ -204,7 +262,8 @@ class ConsensusProtocol:
         total_confidence = 0.0
         
         for v in final_verdicts:
-            verdict_label = v.get("verdict", "Unknown")
+            raw_verdict = v.get("verdict", "Unknown")
+            verdict_label = self._normalize_verdict(raw_verdict)
             
             # Handle confidence as either float or string
             confidence = v.get("confidence", 0.0)
@@ -253,19 +312,20 @@ class ConsensusProtocol:
                 "reasoning": f"Insufficient consensus: {consensus_percentage:.0f}% agreement"
             }
     
-    def run_full_protocol(self, evidence: str) -> Dict[str, Any]:
+    def run_full_protocol(self, evidence: str, current_date: str = None) -> Dict[str, Any]:
         """
         Run complete consensus protocol: initial verdicts → debate → consensus.
         
         Args:
             evidence: Formatted evidence string
+            current_date: Current date string for temporal context
             
         Returns:
             Dict with final consensus and full debate transcript
         """
         # Stage 1: Initial verdicts
         print("Gathering initial agent verdicts...")
-        initial_verdicts = self.gather_agent_verdicts(evidence)
+        initial_verdicts = self.gather_agent_verdicts(evidence, current_date=current_date)
         
         # Stage 2: Structured debate
         print("Conducting agent debate...")
