@@ -1,6 +1,6 @@
 # News Audit Engine v4.0 - System Architecture
 
-**Document Version**: 1.2  
+**Document Version**: 1.3  
 **Last Updated**: December 27, 2025  
 **Status**: Production Ready - Validated on Multiple Article Types
 
@@ -23,13 +23,39 @@
 
 ## Executive Summary
 
-The News Audit Engine is a sophisticated narrative integrity analysis system that moves beyond atomic fact-checking to evaluate the **logical coherence, evidence quality, and narrative stability** of news content. It employs a four-layer architecture combining Named Entity Recognition (NER), multi-intent web search, semantic conflict detection via vector databases, and multi-agent consensus protocols.
+The News Audit Engine is a sophisticated narrative integrity analysis system that moves beyond atomic fact-checking to evaluate the **logical coherence, evidence quality, and narrative stability** of news content. It employs a 4.5-layer architecture combining Named Entity Recognition (NER), multi-intent web search, semantic conflict detection via vector databases, and adversarial multi-agent consensus with executive reconciliation.
 
-**Key Innovation**: Rather than verifying individual facts (brittle, context-dependent), the system audits the **structural integrity** of narrative pillars—the causal arguments that form a story's logical backbone.
+**Key Innovation**: Rather than verifying individual facts (brittle, context-dependent), the system audits the **structural integrity** of narrative pillars—the causal arguments that form a story's logical backbone. Agents act as specialized "prosecutors" hunting specific failure modes, with an Executive Decision Agent reconciling conflicts and ensuring policy consistency.
 
-**Design Philosophy**: Intellectual honesty over false precision. When evidence is contradictory, the system returns "Inconclusive" rather than a random guess.
+**Design Philosophy**: Intellectual honesty over false precision. When evidence is contradictory, the system returns "Inconclusive" rather than a random guess. Agents are adversarial by design, each attacking different failure modes to prevent groupthink.
 
-### Recent Improvements (v1.2 - December 27, 2025)
+### Recent Improvements (v1.3 - December 27, 2025)
+
+1. **Adversarial Agent Architecture** - Agents transformed from collaborative to adversarial "prosecutors"
+   - **The Auditor (Framing Prosecutor)**: Hunts manipulative framing, causality leaps, omitted qualifiers, narrative overreach
+     * Required field: `framing_risk` (low|medium|high)
+   - **The Contextualist (Timeline Prosecutor)**: Hunts timeline incoherence, then/now conflation, mis-anchored claims
+     * Required field: `temporal_coherence` (good|mixed|poor)
+   - **The Skeptic (Source Prosecutor)**: Hunts circular reporting, missing primary docs, source tier issues
+     * Required field: `source_quality` (strong|mixed|weak)
+   - Each agent focuses on a specific failure mode to prevent unanimous false positives
+   - File: `prompts/agent_prompts.json`
+
+2. **Executive Decision Agent (Layer 4.5)** - New reconciliation layer between agent debate and final output
+   - Reconciles conflicts when agents disagree on verdict
+   - Applies policy rules consistently across all verdicts
+   - Overrides majority when critical failure mode detected (e.g., extraordinary claim + weak sources)
+   - Produces detailed audit trail with explicit decision basis
+   - Required fields: `final_verdict`, `confidence`, `decision_basis` (majority|override|insufficient_evidence), `override_reason`, `which_agent_was_most_correct`, `evidence_citations`, `what_would_change_my_mind`
+   - Files: `src/consensus_protocol.py` (executive_decision method), `cli.py` (executive decision display)
+
+3. **Prompt Externalization** - All agent prompts moved from Python code to JSON for easier editing
+   - Prompts loaded dynamically from `prompts/agent_prompts.json`
+   - Template variables preserved with double-brace escaping (`{{ }}` → `{` in Python)
+   - Enables prompt iteration without code changes
+   - File: `prompts/agent_prompts.json`
+
+### Previous Improvements (v1.2 - December 27, 2025)
 
 1. **Enhanced Fabrication Detection** - Auditor now detects extraordinary claims lacking primary sources
    - Explicit requirement for primary source documentation (Federal Register, Treasury.gov, .gov domains)
@@ -39,7 +65,7 @@ The News Audit Engine is a sophisticated narrative integrity analysis system tha
    - File: `src/consensus_protocol.py` (Auditor prompt template)
 
 2. **Terminal Output UX** - Final verdict now appears at end for emphasis
-   - Flow: DETAILED ANALYSIS → FINAL VERDICT
+   - Flow: DETAILED ANALYSIS → EXECUTIVE DECISION → FINAL VERDICT
    - Shows reasoning process first, then conclusion
    - File: `cli.py` (lines 238-309)
 
@@ -122,19 +148,32 @@ The News Audit Engine is a sophisticated narrative integrity analysis system tha
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│              LAYER 4: CONSENSUS PROTOCOL                         │
+│          LAYER 4: ADVERSARIAL CONSENSUS PROTOCOL                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │              Multi-Agent Debate System                   │   │
-│  │  ┌───────────┐  ┌────────────────┐  ┌──────────────┐  │   │
-│  │  │The Auditor│  │The Contextualist│  │The Skeptic   │  │   │
-│  │  │Logic &    │  │Temporal &       │  │Evidence      │  │   │
-│  │  │Framing    │  │History          │  │Quality       │  │   │
-│  │  └───────────┘  └────────────────┘  └──────────────┘  │   │
+│  │           Multi-Agent Adversarial Debate                 │   │
+│  │  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐   │   │
+│  │  │The Auditor   │ │Contextualist │ │The Skeptic   │   │   │
+│  │  │Framing       │ │Timeline      │ │Source        │   │   │
+│  │  │Prosecutor    │ │Prosecutor    │ │Prosecutor    │   │   │
+│  │  └──────────────┘ └──────────────┘ └──────────────┘   │   │
 │  │       ↓                ↓                   ↓            │   │
 │  │  Initial Verdict  →  2-Round Debate  →  Final Verdict  │   │
+│  │  (framing_risk)    (temporal_coherence) (source_quality)│   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│            LAYER 4.5: EXECUTIVE DECISION                         │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │          Executive Decision Agent                        │   │
+│  │  • Reconciles agent conflicts                            │   │
+│  │  • Applies policy rules consistently                     │   │
+│  │  • Overrides majority when critical failure detected     │   │
+│  │  • Produces audit trail with explicit decision basis     │   │
+│  │  • Identifies which agent was most correct               │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │         ↓                                                        │
-│    80% Consensus Threshold → Verdict or "Inconclusive"          │
+│    Final Verdict + Confidence + Decision Basis + Audit Trail    │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -570,72 +609,99 @@ The Semantic Judge solves this by:
 
 ---
 
-### Layer 4: Consensus (The Stability Protocol)
+### Layer 4: Adversarial Consensus Protocol
 
-**Purpose**: Multi-agent debate system to ensure verdicts are stable, explainable, and intellectually honest.
+**Purpose**: Adversarial multi-agent debate system where each agent acts as a specialized "prosecutor" hunting specific failure modes to prevent groupthink and false positives.
 
-**Agent Personas** (from `prompts/agent_personas.json`):
+**Design Philosophy**: Agents are adversarial by design, not collaborative. Each agent attacks a different failure mode (framing, timeline, sources) to ensure thorough scrutiny. An Executive Decision Agent then reconciles conflicts and ensures policy consistency.
 
-1. **The Auditor**
-   - Focus: Logical consistency, emotional manipulation, loaded language
-   - Specialty: Identifying rhetorical fallacies and framing bias
+**Agent Personas** (from `prompts/agent_prompts.json`):
 
-2. **The Contextualist**
-   - Focus: Temporal accuracy, historical continuity, causal logic
-   - Specialty: Timeline coherence and event sequencing
+1. **The Auditor (Framing Prosecutor)**
+   - **Mission**: Aggressively hunt manipulative framing, causality leaps, omitted qualifiers, narrative overreach
+   - **Required Field**: `framing_risk` (low|medium|high)
+   - **Assessment Criteria**:
+     * High: Multiple loaded terms, causality leaps without evidence, significant narrative overreach
+     * Medium: Some biased framing or missing qualifiers, but core facts appear sound
+     * Low: Neutral language, appropriate qualifiers, claims match evidence scope
+   - **Key Rules**:
+     * Extraordinary claims require extraordinary evidence (Federal Register, .gov domains, AP/Reuters)
+     * "Zero conflicts + zero primary sources" = fabrication, not insufficient evidence
+     * Circular reporting without institutional verification = misleading
+   - **Job**: NOT to give benefit of doubt - attack framing integrity
 
-3. **The Skeptic**
+2. **The Contextualist (Timeline Prosecutor)**
+   - **Mission**: Aggressively hunt timeline incoherence, then/now conflation, mis-anchored claims, position evolution misframing
+   - **Required Field**: `temporal_coherence` (good|mixed|poor)
+   - **Assessment Criteria**:
+     * Poor: Timeline contradictions, conflation of past/present, mis-anchored temporal claims
+     * Mixed: Some temporal vagueness but core sequence is logical
+     * Good: Clear timeline, proper temporal anchoring, accurate sequencing
+   - **Key Rules**:
+     * Policy announcements can "contradict historical trends" and still be accurately reported
+     * If classified as position_evolution, finding OLD position validates the change
+     * Don't confuse "bad policy" with "fabricated news"
+   - **Job**: NOT to give benefit of doubt - attack temporal logic
 
-**Conflict Interpretation Guidance** (NEW):
-Each agent receives guidance on how to interpret conflict classifications from Layer 3:
+3. **The Skeptic (Source Prosecutor)**
+   - **Mission**: Aggressively hunt circular reporting, missing primary docs, source tier issues, consensus search mismatch
+   - **Required Field**: `source_quality` (strong|mixed|weak)
+   - **Assessment Criteria**:
+     * Weak: Circular reporting, no primary sources, reliance on unverified leaks or social media
+     * Mixed: Some credible sources but gaps in primary documentation or potential circular reporting
+     * Strong: Multiple independent primary sources (gov, courts, AP, Reuters, established news orgs)
+   - **Key Rules**:
+     * Distinguish between primary news (announcement happened) vs expert analysis (policy won't work)
+     * If major claim but Reuters/AP/official sources silent = consensus search mismatch
+     * For position_evolution: documenting BOTH old and new positions = strong validation
+   - **Job**: NOT to give benefit of doubt - attack source quality
 
-- **factual_contradiction**: Both agents and conflicts indicate low credibility
-- **position_evolution**: Historical contradiction VALIDATES the article if it reports a policy shift
-  * Auditor: "position_evolution actually VALIDATES the article if it reports a policy shift"
-  * Contextualist: "CRITICAL: position_evolution conflicts are YOUR SPECIALTY... finding evidence of their OLD position is VALIDATION not contradiction... DO NOT second-guess the classification"
-  * Skeptic: "For position_evolution: if credible sources document BOTH the historical stance AND the new stance, this is strong evidence the change happened"
-- **source_disagreement**: Evaluate source quality and credibility to determine verdict
-   - Focus: Source credibility, evidence sufficiency, methodological weaknesses
-   - Specialty: Devil's advocate, challenges evidence quality
-
-**Agent Prompt Enhancements (v1.1)**:
-
-- **Current Date Context**: Each prompt includes `CURRENT DATE: {current_date}` for temporal awareness
-- **Verdict Constraints**: Explicit enumeration of allowed verdicts prevents free-form responses
-- **Classification Guidance**: Clear rules for interpreting position_evolution vs factual_contradiction
+**Common Fields for All Agents**:
+- `officially_reported` (bool): Did official sources (White House, .gov, AP, Reuters) report this?
+- `extraordinary_claim` (bool): Does this require extraordinary evidence?
+- `primary_sources_found` (list): URLs and types of primary sources
+- `circular_reporting_risk` (low|medium|high)
+- `key_supporting_urls` (list)
+- `key_opposing_urls` (list)
 
 **Debate Protocol**:
 
 1. **Initial Verdicts** (Turn 0)
-   - Each agent independently analyzes evidence summary
-   - Returns: `{verdict, confidence, reasoning}`
-   - Possible verdicts: **Accurate, Misleading, Biased, Inconclusive** (standardized)
-   - Prompts include current date and explicit verdict constraints
+   - Each of the 3 adversarial agents independently analyzes evidence
+   - Returns: `{verdict, confidence, reasoning, framing_risk|temporal_coherence|source_quality, ...}`
+   - Possible verdicts: **Accurate, Misleading, Biased, Inconclusive**
+   - Executive agent does NOT participate in this round
 
 2. **Structured Debate** (Turns 1-2)
    - Each agent reviews others' verdicts
    - Reconsiders position based on peer perspectives
    - Returns: `{verdict, confidence, reasoning, changed: true/false}`
+   - Agents can change verdicts if persuaded by others' specialized analysis
 
-3. **Consensus Calculation**
-   - **Verdict Normalization**: Maps common variations to standard labels
-     ```python
-     if 'accurate' in verdict: return "Accurate"
-     elif 'misleading' in verdict: return "Misleading"
-     elif 'biased' in verdict: return "Biased"
-     else: return "Inconclusive"
-     ```
-   - Count verdict distribution
-   - Calculate consensus percentage: `(majority_count / 3) × 100`
-   - Average confidence of majority agents
+3. **Executive Decision** (Layer 4.5)
+   - Executive Decision Agent reviews all agent verdicts and evidence
+   - **Decision Basis Rules**:
+     * `majority`: 2+ agents agree and no critical override needed
+     * `override`: Must contradict majority due to critical failure mode (extraordinary claim + weak sources, high framing_risk + no primary sources, poor temporal_coherence)
+     * `insufficient_evidence`: Agents split 3 ways or all vote Inconclusive
+   - Returns comprehensive decision with:
+     * `final_verdict`: Accurate|Misleading|Biased|Inconclusive
+     * `confidence`: 0.0-1.0
+     * `decision_basis`: majority|override|insufficient_evidence
+     * `override_reason`: Explanation if overriding majority
+     * `which_agent_was_most_correct`: auditor|contextualist|skeptic|none
+     * `evidence_citations`: Specific URLs supporting verdict
+     * `what_would_change_my_mind`: What evidence would flip the verdict
+     * `reasoning`: Synthesis explaining which failure mode was decisive
 
-4. **Threshold Check**
-   - **Pass**: ≥80% consensus + ≥70% avg confidence → Return verdict
-   - **Fail**: <80% consensus → Return "Inconclusive"
+4. **Traditional Consensus** (Fallback)
+   - Still calculated for reference/comparison
+   - 80% consensus threshold
+   - Stored in `audit_result.json` as `traditional_consensus`
 
-**Key Design Choice**: High bar (80%) intentionally prevents unstable verdicts. "Inconclusive" is a feature, not a bug—it signals genuine ambiguity.
+**Key Design Choice**: Executive agent can override unanimous majority if critical policy rule applies (e.g., all agents say "Accurate" but claim lacks primary sources for extraordinary assertion). Produces explicit audit trail showing decision logic and what evidence would change the verdict.
 
-**File**: `src/consensus_protocol.py`
+**File**: `src/consensus_protocol.py`, `prompts/agent_prompts.json`
 
 ---
 

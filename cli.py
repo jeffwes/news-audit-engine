@@ -262,8 +262,40 @@ def main():
             agent_ver = agent_verdict.get("verdict", "N/A")
             agent_conf = agent_verdict.get("confidence", 0)
             agent_reason = agent_verdict.get("reasoning", "")
+            officially_reported = agent_verdict.get("officially_reported", None)
+            extraordinary = agent_verdict.get("extraordinary_claim", None)
+            circular_risk = agent_verdict.get("circular_reporting_risk", None)
+            primary_sources = agent_verdict.get("primary_sources_found", [])
+            
+            # New adversarial fields
+            framing_risk = agent_verdict.get("framing_risk", None)
+            temporal_coherence = agent_verdict.get("temporal_coherence", None)
+            source_quality = agent_verdict.get("source_quality", None)
             
             print(f"\n   {agent_name}: {agent_ver} ({agent_conf:.0%} confidence)")
+            
+            # Show adversarial assessment fields
+            if framing_risk:
+                risk_emoji = {"low": "✓", "medium": "⚠", "high": "✗"}
+                print(f"      Framing Risk: {risk_emoji.get(framing_risk, '?')} {framing_risk.title()}")
+            if temporal_coherence:
+                coherence_emoji = {"good": "✓", "mixed": "⚠", "poor": "✗"}
+                print(f"      Temporal Coherence: {coherence_emoji.get(temporal_coherence, '?')} {temporal_coherence.title()}")
+            if source_quality:
+                quality_emoji = {"strong": "✓", "mixed": "⚠", "weak": "✗"}
+                print(f"      Source Quality: {quality_emoji.get(source_quality, '?')} {source_quality.title()}")
+            
+            if officially_reported is not None:
+                print(f"      Officially Reported: {'✓ Yes' if officially_reported else '✗ No'}")
+            if extraordinary is not None:
+                print(f"      Extraordinary Claim: {'✓ Yes' if extraordinary else '✗ No'}")
+            if circular_risk:
+                risk_emoji = {"low": "✓", "medium": "⚠", "high": "✗"}
+                print(f"      Circular Reporting Risk: {risk_emoji.get(circular_risk, '?')} {circular_risk.title()}")
+            if primary_sources:
+                print(f"      Primary Sources: {len(primary_sources)} found")
+                for src in primary_sources[:2]:  # Show first 2
+                    print(f"         • {src.get('type', 'unknown')}: {src.get('url', 'N/A')[:60]}...")
             print(f"   → {agent_reason}")
         
         # After Debate
@@ -275,11 +307,28 @@ def main():
             agent_reason = agent_verdict.get("reasoning", "")
             changed = agent_verdict.get("changed", False)
             
+            # New adversarial fields
+            framing_risk = agent_verdict.get("framing_risk", None)
+            temporal_coherence = agent_verdict.get("temporal_coherence", None)
+            source_quality = agent_verdict.get("source_quality", None)
+            
             verdict_text = f"{agent_ver} ({agent_conf:.0%} confidence)"
             if changed:
                 verdict_text += " [CHANGED]"
             
             print(f"\n   {agent_name}: {verdict_text}")
+            
+            # Show adversarial assessment fields
+            if framing_risk:
+                risk_emoji = {"low": "✓", "medium": "⚠", "high": "✗"}
+                print(f"      Framing Risk: {risk_emoji.get(framing_risk, '?')} {framing_risk.title()}")
+            if temporal_coherence:
+                coherence_emoji = {"good": "✓", "mixed": "⚠", "poor": "✗"}
+                print(f"      Temporal Coherence: {coherence_emoji.get(temporal_coherence, '?')} {temporal_coherence.title()}")
+            if source_quality:
+                quality_emoji = {"strong": "✓", "mixed": "⚠", "weak": "✗"}
+                print(f"      Source Quality: {quality_emoji.get(source_quality, '?')} {source_quality.title()}")
+            
             print(f"   → {agent_reason}")
         
         # Show conflict summary if any
@@ -291,15 +340,52 @@ def main():
         else:
             print(f"\n✓ No conflicts detected")
         
-        # Print FINAL VERDICT at the very end
+        # Print EXECUTIVE DECISION (Layer 4.5)
         print(f"\n{'='*60}")
-        print("FINAL VERDICT")
+        print("EXECUTIVE DECISION (Layer 4.5)")
         print(f"{'='*60}")
         verdict = result["consensus"]
-        print(f"Verdict: {verdict['verdict']}")
-        print(f"Confidence: {verdict['confidence']:.1%}")
-        print(f"Consensus: {verdict['consensus_percentage']:.0f}%")
-        print(f"Reasoning: {verdict['reasoning']}")
+        
+        # Check if this is an executive decision or traditional consensus
+        if "decision_basis" in verdict:
+            # Executive decision format
+            print(f"Final Verdict: {verdict.get('final_verdict', verdict.get('verdict', 'N/A'))}")
+            print(f"Confidence: {verdict.get('confidence', 0):.1%}")
+            
+            decision_basis = verdict.get("decision_basis", "N/A").replace('_', ' ').title()
+            print(f"Decision Basis: {decision_basis}")
+            
+            if verdict.get("override_reason"):
+                print(f"\n⚠️  Override Applied:")
+                print(f"   → {verdict['override_reason']}")
+            
+            which_agent = verdict.get("which_agent_was_most_correct", "none")
+            if which_agent != "none":
+                print(f"\n🎯 Most Correct Agent: {which_agent.title()}")
+            
+            citations = verdict.get("evidence_citations", [])
+            if citations:
+                print(f"\n📎 Key Evidence:")
+                for i, cite in enumerate(citations[:3], 1):
+                    # Truncate long URLs
+                    cite_display = cite if len(cite) <= 80 else cite[:77] + "..."
+                    print(f"   {i}. {cite_display}")
+            
+            change_mind = verdict.get("what_would_change_my_mind", [])
+            if change_mind:
+                print(f"\n🔄 What Would Change This Verdict:")
+                for i, condition in enumerate(change_mind[:3], 1):
+                    print(f"   {i}. {condition}")
+            
+            print(f"\n💭 Executive Reasoning:")
+            print(f"   {verdict.get('reasoning', 'N/A')}")
+        else:
+            # Traditional consensus format (fallback)
+            print(f"Verdict: {verdict.get('verdict', 'N/A')}")
+            print(f"Confidence: {verdict.get('confidence', 0):.1%}")
+            if 'consensus_percentage' in verdict:
+                print(f"Consensus: {verdict['consensus_percentage']:.0f}%")
+            print(f"Reasoning: {verdict.get('reasoning', 'N/A')}")
         
         print(f"\n{'='*60}\n")
         

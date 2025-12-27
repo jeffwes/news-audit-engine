@@ -5,6 +5,8 @@ Three agent personas debate the evidence and reach consensus
 on narrative integrity verdict.
 """
 from typing import Dict, Any, List
+import json
+import os
 from src.gemini_client import GeminiClient
 
 
@@ -15,108 +17,14 @@ class ConsensusProtocol:
         """Initialize consensus protocol with agent personas."""
         self.gemini = gemini_client
         
-        # Agent personas
-        self.agents = {
-            "auditor": {
-                "name": "The Auditor",
-                "role": "Focuses on logical consistency, emotional framing, and loaded language.",
-                "prompt_template": (
-                    "CURRENT DATE: {current_date}\n\n"
-                    "You are The Auditor. Analyze the following evidence for logical consistency, "
-                    "emotional manipulation, and biased framing. Focus on:\n"
-                    "- Are claims internally consistent?\n"
-                    "- Is emotional language used to influence rather than inform?\n"
-                    "- Are there logical fallacies or misleading framing?\n"
-                    "- For extraordinary claims (major policy shifts, executive orders, national emergencies), "
-                    "is there PRIMARY SOURCE DOCUMENTATION from authoritative institutions?\n\n"
-                    "EXTRAORDINARY CLAIMS REQUIRE EXTRAORDINARY EVIDENCE:\n"
-                    "- Claims about executive orders, national emergencies, or major policy changes require "
-                    "documentation from PRIMARY sources: Federal Register, Treasury.gov, official .gov domains, "
-                    "major wire services (AP, Reuters), or established news organizations\n"
-                    "- If search results show 'zero conflicts' but also ZERO primary sources named, this indicates "
-                    "the claim likely has NO VERIFIABLE BASIS (fabrication), not 'insufficient evidence'\n"
-                    "- Internal consistency across multiple 'reported' sources WITHOUT institutional verification "
-                    "suggests circular reporting of fabricated content, not validation\n\n"
-                    "CONFLICT CLASSIFICATION GUIDANCE:\n"
-                    "- factual_contradiction: Undermines credibility\n"
-                    "- position_evolution: If article reports a policy/position CHANGE and evidence shows "
-                    "the OLD position, this VALIDATES the change story (not a contradiction)\n"
-                    "- source_disagreement: Evaluate source quality\n\n"
-                    "Evidence:\n{evidence}\n\n"
-                    "IMPORTANT: Your verdict MUST be exactly one of these labels:\n"
-                    "- Accurate: Claims are well-supported and properly contextualized\n"
-                    "- Misleading: Claims contain factual errors, misleading framing, OR extraordinary claims with zero credible support\n"
-                    "- Biased: Claims show clear bias but facts are not necessarily wrong\n"
-                    "- Inconclusive: Conflicting evidence from credible sources where both sides have merit\n\n"
-                    "CRITICAL DISTINCTION - Misleading vs Inconclusive:\n"
-                    "- Use 'Misleading' when: Extraordinary claim has NO credible supporting evidence, OR clear evidence of falsehood\n"
-                    "- Use 'Inconclusive' when: CONFLICTING evidence from credible sources on both sides\n"
-                    "- Absence of evidence FOR an extraordinary claim = Misleading, not Inconclusive\n"
-                    "- 'Zero conflicts' does NOT mean 'Accurate' - it may mean the fabricated claim has no contradictory "
-                    "evidence because it was never reported by credible sources in the first place\n\n"
-                    "Provide your assessment as JSON with keys: verdict (must be one of the above), confidence (0.0-1.0), reasoning"
-                )
-            },
-            "contextualist": {
-                "name": "The Contextualist",
-                "role": "Focuses on temporal logic and historical continuity.",
-                "prompt_template": (
-                    "CURRENT DATE: {current_date}\n\n"
-                    "You are The Contextualist. Analyze the following evidence for temporal "
-                    "logic and historical accuracy. Focus on:\n"
-                    "- Are temporal claims accurate and properly contextualized?\n"
-                    "- Does the narrative respect historical continuity?\n"
-                    "- Are events presented in proper sequence with correct causality?\n\n"
-                    "CRITICAL - CONFLICT CLASSIFICATION:\n"
-                    "- Conflicts have been PRE-CLASSIFIED by the semantic judge\n"
-                    "- position_evolution means the article reports a CHANGE in position\n"
-                    "- If classification='position_evolution', finding evidence of the OLD position "
-                    "is STRONG VALIDATION that the reported change is real and newsworthy\n"
-                    "- DO NOT second-guess the classification - use it to inform your verdict\n"
-                    "- Only factual_contradiction indicates inaccuracy\n\n"
-                    "Evidence:\n{evidence}\n\n"
-                    "IMPORTANT: Your verdict MUST be exactly one of these labels:\n"
-                    "- Accurate: Claims are well-supported and properly contextualized\n"
-                    "- Misleading: Claims contain factual errors, misleading framing, OR extraordinary claims with zero credible support\n"
-                    "- Biased: Claims show clear bias but facts are not necessarily wrong\n"
-                    "- Inconclusive: Conflicting evidence from credible sources where both sides have merit\n\n"
-                    "CRITICAL DISTINCTION - Misleading vs Inconclusive:\n"
-                    "- Use 'Misleading' when: Extraordinary claim has NO credible supporting evidence, OR clear evidence of falsehood\n"
-                    "- Use 'Inconclusive' when: CONFLICTING evidence from credible sources on both sides\n"
-                    "- Absence of evidence FOR an extraordinary claim = Misleading, not Inconclusive\n\n"
-                    "Provide your assessment as JSON with keys: verdict (must be one of the above), confidence (0.0-1.0), reasoning"
-                )
-            },
-            "skeptic": {
-                "name": "The Skeptic",
-                "role": "Devil's advocate challenging evidence quality.",
-                "prompt_template": (
-                    "CURRENT DATE: {current_date}\n\n"
-                    "You are The Skeptic. Challenge the quality and reliability of this evidence. "
-                    "Focus on:\n"
-                    "- Are the sources credible and authoritative?\n"
-                    "- Is there sufficient evidence to support the verdict?\n"
-                    "- What are the weaknesses in the available evidence?\n\n"
-                    "CONFLICT INTERPRETATION:\n"
-                    "- For position_evolution: If credible sources document BOTH the historical "
-                    "stance AND the new stance, this is strong evidence the change happened\n"
-                    "- The contradiction between old and new positions IS the story itself\n"
-                    "- For source_disagreement: Evaluate which sources are more authoritative\n\n"
-                    "Evidence:\n{evidence}\n\n"
-                    "IMPORTANT: Your verdict MUST be exactly one of these labels:\n"
-                    "- Accurate: Claims are well-supported and properly contextualized\n"
-                    "- Misleading: Claims contain factual errors, misleading framing, OR extraordinary claims with zero credible support\n"
-                    "- Biased: Claims show clear bias but facts are not necessarily wrong\n"
-                    "- Inconclusive: Conflicting evidence from credible sources where both sides have merit\n\n"
-                    "CRITICAL DISTINCTION - Misleading vs Inconclusive:\n"
-                    "- Use 'Misleading' when: Extraordinary claim has NO credible supporting evidence, OR clear evidence of falsehood\n"
-                    "- Use 'Inconclusive' when: CONFLICTING evidence from credible sources on both sides\n"
-                    "- Absence of evidence FOR an extraordinary claim = Misleading, not Inconclusive\n"
-                    "- You are the Skeptic - demand evidence for extraordinary claims!\n\n"
-                    "Provide your assessment as JSON with keys: verdict (must be one of the above), confidence (0.0-1.0), reasoning"
-                )
-            }
-        }
+        # Load agent prompts from JSON file
+        prompts_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'prompts', 'agent_prompts.json')
+        with open(prompts_path, 'r') as f:
+            self.agents = json.load(f)
+        # Load agent prompts from JSON file
+        prompts_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'prompts', 'agent_prompts.json')
+        with open(prompts_path, 'r') as f:
+            self.agents = json.load(f)
     
     def gather_agent_verdicts(self, evidence: str, current_date: str = None) -> List[Dict[str, Any]]:
         """
@@ -137,7 +45,10 @@ class ConsensusProtocol:
         
         verdicts = []
         
-        for agent_id, agent_config in self.agents.items():
+        # Only iterate over the three main agents (skip executive)
+        main_agents = {k: v for k, v in self.agents.items() if k != "executive"}
+        
+        for agent_id, agent_config in main_agents.items():
             prompt = agent_config["prompt_template"].format(
                 evidence=evidence,
                 current_date=current_date
@@ -337,6 +248,72 @@ class ConsensusProtocol:
                 "reasoning": f"Insufficient consensus: {consensus_percentage:.0f}% agreement"
             }
     
+    def executive_decision(self, agent_verdicts: List[Dict], evidence: str, current_date: str = None) -> Dict[str, Any]:
+        """
+        Layer 4.5: Executive Decision Agent reconciles conflicts and produces final verdict.
+        
+        Args:
+            agent_verdicts: List of agent verdict dicts (initial or final)
+            evidence: Formatted evidence string
+            current_date: Current date string
+            
+        Returns:
+            Dict with executive decision including final_verdict, decision_basis, override_reason, etc.
+        """
+        from datetime import datetime
+        
+        if not current_date:
+            current_date = datetime.now().strftime("%B %d, %Y")
+        
+        # Format agent verdicts for executive review
+        agent_summary = json.dumps(agent_verdicts, indent=2)
+        
+        # Get executive agent prompt
+        exec_config = self.agents.get("executive")
+        if not exec_config:
+            # Fallback: no executive agent, use traditional consensus
+            return self.calculate_consensus(agent_verdicts)
+        
+        prompt = exec_config["prompt_template"].format(
+            agent_verdicts=agent_summary,
+            evidence=evidence,
+            current_date=current_date
+        )
+        
+        try:
+            response = self.gemini.generate_json(
+                prompt=prompt,
+                timeout=60,
+                temperature=0.1  # Very low temp for consistent policy application
+            )
+            
+            # Validate response structure
+            if isinstance(response, list):
+                response = response[0]
+            
+            # Extract data from Gemini response wrapper
+            if isinstance(response, dict) and "data" in response:
+                response = response["data"]
+            
+            # Ensure required fields exist
+            if not response.get("final_verdict"):
+                print(f"  ✗ WARNING: Executive agent missing final_verdict field")
+                print(f"  Response keys: {list(response.keys()) if isinstance(response, dict) else 'not a dict'}")
+                return self.calculate_consensus(agent_verdicts)
+            
+            # Add metadata
+            response["agent"] = "Executive"
+            response["agent_id"] = "executive"
+            
+            return response
+            
+        except Exception as e:
+            print(f"  ✗ ERROR in Executive Decision: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to traditional consensus
+            return self.calculate_consensus(agent_verdicts)
+    
     def run_full_protocol(self, evidence: str, current_date: str = None) -> Dict[str, Any]:
         """
         Run complete consensus protocol: initial verdicts → debate → consensus.
@@ -356,12 +333,16 @@ class ConsensusProtocol:
         print("Conducting agent debate...")
         final_verdicts = self.conduct_debate(initial_verdicts, evidence, max_turns=2)
         
-        # Stage 3: Calculate consensus
-        print("Calculating final consensus...")
+        # Stage 3: Executive Decision (Layer 4.5)
+        print("Executive agent reviewing verdicts...")
+        executive_decision = self.executive_decision(final_verdicts, evidence, current_date=current_date)
+        
+        # Stage 4: Traditional consensus (for comparison/fallback)
         consensus = self.calculate_consensus(final_verdicts)
         
         return {
-            "consensus": consensus,
+            "consensus": executive_decision,  # Use executive decision as primary consensus
+            "traditional_consensus": consensus,  # Keep for reference
             "initial_verdicts": initial_verdicts,
             "final_verdicts": final_verdicts,
             "debate_turns": 2
