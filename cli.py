@@ -237,7 +237,61 @@ def main():
         result = consensus.run_full_protocol(evidence_summary, current_date=current_date)
         tracker.complete_phase()
         
-        # Print final verdict
+        # Print detailed analysis summary FIRST
+        print(f"\n{'='*60}")
+        print("DETAILED ANALYSIS")
+        print(f"{'='*60}")
+        
+        # Show key pillar analyzed
+        if enriched_pillars:
+            key_pillar = enriched_pillars[0]
+            print(f"\n📌 Key Pillar Analyzed:")
+            print(f"   {key_pillar.get('text', 'N/A')[:200]}...")
+            print(f"   Importance: {key_pillar.get('importance', 0)}/5")
+            if key_pillar.get('is_change'):
+                print(f"   Type: Position Evolution")
+            print(f"   Entities: {len(key_pillar.get('entities', []))}")
+        
+        # Show agent verdicts
+        print(f"\n🤖 Agent Verdicts:")
+        
+        # Initial Round
+        print(f"\n   Initial Round:")
+        for agent_verdict in result.get("initial_verdicts", []):
+            agent_name = agent_verdict.get("agent", "Unknown")
+            agent_ver = agent_verdict.get("verdict", "N/A")
+            agent_conf = agent_verdict.get("confidence", 0)
+            agent_reason = agent_verdict.get("reasoning", "")
+            
+            print(f"\n   {agent_name}: {agent_ver} ({agent_conf:.0%} confidence)")
+            print(f"   → {agent_reason}")
+        
+        # After Debate
+        print(f"\n   After Debate:")
+        for agent_verdict in result.get("final_verdicts", []):
+            agent_name = agent_verdict.get("agent", "Unknown")
+            agent_ver = agent_verdict.get("verdict", "N/A")
+            agent_conf = agent_verdict.get("confidence", 0)
+            agent_reason = agent_verdict.get("reasoning", "")
+            changed = agent_verdict.get("changed", False)
+            
+            verdict_text = f"{agent_ver} ({agent_conf:.0%} confidence)"
+            if changed:
+                verdict_text += " [CHANGED]"
+            
+            print(f"\n   {agent_name}: {verdict_text}")
+            print(f"   → {agent_reason}")
+        
+        # Show conflict summary if any
+        if all_conflicts:
+            print(f"\n⚠️  Conflicts Detected: {len(all_conflicts)}")
+            for i, conflict in enumerate(all_conflicts[:3], 1):
+                print(f"\n   Conflict {i}: {conflict.get('classification', 'unknown')}")
+                print(f"   Supporting: {conflict.get('supporting_count', 0)} | Opposing: {conflict.get('opposing_count', 0)}")
+        else:
+            print(f"\n✓ No conflicts detected")
+        
+        # Print FINAL VERDICT at the very end
         print(f"\n{'='*60}")
         print("FINAL VERDICT")
         print(f"{'='*60}")
@@ -246,6 +300,8 @@ def main():
         print(f"Confidence: {verdict['confidence']:.1%}")
         print(f"Consensus: {verdict['consensus_percentage']:.0f}%")
         print(f"Reasoning: {verdict['reasoning']}")
+        
+        print(f"\n{'='*60}\n")
         
         # Save detailed output
         output_path = Path("audit_result.json")
@@ -260,7 +316,7 @@ def main():
         with open(output_path, 'w') as f:
             json.dump(output_data, f, indent=2)
         
-        print(f"\n✓ Detailed results saved to: {output_path}")
+        print(f"✓ Detailed results saved to: {output_path}")
         
     except Exception as e:
         tracker.error(str(e))

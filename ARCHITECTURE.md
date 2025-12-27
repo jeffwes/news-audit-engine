@@ -1,8 +1,8 @@
 # News Audit Engine v4.0 - System Architecture
 
-**Document Version**: 1.1  
-**Last Updated**: December 26, 2025  
-**Status**: Production Ready - Validated on NYT Articles
+**Document Version**: 1.2  
+**Last Updated**: December 27, 2025  
+**Status**: Production Ready - Validated on Multiple Article Types
 
 ---
 
@@ -29,7 +29,21 @@ The News Audit Engine is a sophisticated narrative integrity analysis system tha
 
 **Design Philosophy**: Intellectual honesty over false precision. When evidence is contradictory, the system returns "Inconclusive" rather than a random guess.
 
-### Recent Improvements (v1.1 - December 26, 2025)
+### Recent Improvements (v1.2 - December 27, 2025)
+
+1. **Enhanced Fabrication Detection** - Auditor now detects extraordinary claims lacking primary sources
+   - Explicit requirement for primary source documentation (Federal Register, Treasury.gov, .gov domains)
+   - "Zero conflicts + zero primary sources" pattern now flags fabrication, not insufficient evidence
+   - Circular reporting detection: Multiple "reported" sources without institutional verification
+   - Clarified: "Zero conflicts" doesn't mean accurate - may indicate fabricated claim has no contradictory evidence because credible sources never reported it
+   - File: `src/consensus_protocol.py` (Auditor prompt template)
+
+2. **Terminal Output UX** - Final verdict now appears at end for emphasis
+   - Flow: DETAILED ANALYSIS → FINAL VERDICT
+   - Shows reasoning process first, then conclusion
+   - File: `cli.py` (lines 238-309)
+
+### Previous Improvements (v1.1 - December 26, 2025)
 
 1. **Semantic Judge Conflict Detection** - Fixed URL deduplication and position_evolution handling
    - Sources no longer appear in both supporting and opposing lists
@@ -51,10 +65,12 @@ The News Audit Engine is a sophisticated narrative integrity analysis system tha
    - Conflict details include source URLs and classification reasoning
    - Agents make more informed decisions with complete evidence
 
-**Validation Result**: Tested on NYT article about Ukraine peace negotiations (Dec 24, 2025)
-- Verdict: **Accurate** (92% confidence, 100% consensus)
-- All three agents agreed after structured debate
-- Zero false conflicts detected for position_evolution claim
+**Validation Results**:
+- **NYT Ukraine peace negotiations** (Dec 24, 2025): Accurate (92% confidence, 100% consensus)
+- **RFK Jr. ACIP article**: Accurate (91.7% confidence, 100% consensus)
+- **Vaccine study abstract**: Misleading (90% confidence, 100% consensus)
+- **Fabricated Tesla shutdown**: Misleading (98% confidence, 100% consensus)
+- **Fabricated FedCoin CBDC**: Misleading (100% confidence, 100% consensus)
 
 ---
 
@@ -264,106 +280,291 @@ The News Audit Engine is a sophisticated narrative integrity analysis system tha
 
 ### Layer 3: Synthesis & Conflict Detection (The Semantic Judge)
 
-**Purpose**: Use vector similarity to detect semantic conflicts—situations where highly similar content represents opposing viewpoints.
+**Purpose**: Detect semantic conflicts by comparing the article's narrative pillars against evidence from web searches using vector similarity in a semantic space.
+
+**Why Vector Similarity?** Traditional fact-checking compares exact strings. The Semantic Judge operates in **semantic space** where:
+- Similar meanings cluster together regardless of wording
+- Can detect when sources say the same thing differently
+- Can identify when sources genuinely contradict vs. when they describe different time periods
+- Understands context through vector embeddings rather than keyword matching
 
 **Vector Database**: Qdrant (in-memory mode)
 - Configuration: 768 dimensions, Cosine distance
 - Collection: `audit_evidence`
 - Storage: Ephemeral (resets per analysis)
+- No Docker required for prototyping
 
-**Process**:
+---
 
-1. **Embedding Generation**
-   - API: Gemini `text-embedding-004`
-   - Input: Search result content (up to 500 chars)
-   - Output: 768-dimensional vector
-   - Metadata: pillar ID, search intent, source URL, credibility score
+#### Step 1: Vector Database Setup
 
-2. **Ingestion**
-   - Batch upsert: ~180 vectors per article
-   - Payload: Full metadata + truncated content
+Initializes an in-memory Qdrant instance:
+```python
+self.qdrant = QdrantClient(":memory:")
+self.qdrant.create_collection(
+    collection_name="audit_evidence",
+    vectors_config=VectorParams(size=768, distance=Distance.COSINE)
+)
+```
 
-3. **Conflict Detection**
-   - For each pillar:
-     - Generate pillar embedding
-     - Query Qdrant (top 20 results, >85% similarity)
-     - Group by search intent
-     - Flag if both `confirming` AND `adversarial` results present
-   - Conflict type: `opposing_evidence`
-   - Output: Supporting vs. Opposing source counts
+- **768 dimensions**: Matches Gemini `text-embedding-004` output
+- **Cosine distance**: Measures angle between vectors (semantic similarity)
+- **In-memory**: Fast, no persistence needed for single-article analysis
 
-4. **Conflict Classification** (ENHANCED with Semantic Metadata)
-   - Purpose: Distinguish between different types of narrative conflicts to prevent false positives
-   - Categories:
-     * `factual_contradiction`: Mutually exclusive facts about the SAME event (undermines credibility)
-     * `position_evolution`: Entity changed position over time (validates change stories)
-     * `source_disagreement`: Competing claims about same timeframe (requires source evaluation)
-   
-   - Implementation:
-     ```python
-     def classify_conflict_type(self, pillar: Dict[str, Any], conflict: Dict[str, Any]) -> Dict[str, str]:
-         """Use LLM + semantic metadata to classify conflict into one of three categories."""
-         pillar_text = pillar.get('text')
-         claim_type = pillar.get('claim_type', 'unknown')
-         change_indicators = pillar.get('change_indicators', {})
-         temporal_frame = pillar.get('temporal_frame')
-         
-         prompt = f"""Classify this narrative conflict.
-         
-         NARRATIVE CLAIM: {pillar_text}
-         
-         SEMANTIC METADATA:
-         - Claim Type: {claim_type}
-         - Has Temporal Shift: {change_indicators.get('has_temporal_shift', False)}
-         - Change Verbs Detected: {change_indicators.get('change_verbs', [])}
-         - Temporal Markers: {change_indicators.get('temporal_markers', [])}
-         - Old Position: {temporal_frame.get('old_position') if temporal_frame else 'N/A'}
-         - New Position: {temporal_frame.get('new_position') if temporal_frame else 'N/A'}
-         
-         EVIDENCE CONFLICT: {conflict['supporting_count']} supporting vs {conflict['opposing_count']} opposing
-         
-         CRITICAL RULES:
-         1. If claim_type='position_evolution', classify as B unless clearly impossible
-         2. If change verbs (shift, reverse, abandon) present, classify as B
-         3. If temporal_frame shows old→new transition, classify as B
-         4. Only use A for truly contradictory facts about same event
-         """
-         # Temperature 0.1 for consistent classification
-         return self.gemini.generate_json(prompt, temperature=0.1)
-     ```
-   
-   - Input: Enriched pillar dict with semantic metadata from Layer 1.5
-   - Output: Each conflict includes `classification` and `classification_reasoning` fields
-   - Usage: Layer 4 agents interpret conflicts differently based on classification
-   - Improvement: Explicit semantic signals (change verbs, temporal frames) make classification more consistent and rule-based
+---
 
-4. **Omission Scoring** (TODO)
-   - Compare consensus facts against article pillars
-   - Calculate: `(missing_facts / total_consensus_facts)`
-   - Flag when >50% omission rate
+#### Step 2: Ingest Search Results (`ingest_search_results`)
 
-**Conflict Detection Improvements (v1.1)**:
+For each search result from Layer 2:
 
-- **URL Deduplication**: Same source cannot appear in both supporting and opposing lists
-  ```python
-  # Remove duplicate URLs across intent categories
-  duplicate_urls = set(confirming_urls.keys()) & set(adversarial_urls.keys())
-  for url in duplicate_urls:
-      del adversarial_urls[url]  # Assume nuanced, not contradictory
-  ```
+1. **Extract content** from the search result
+2. **Generate embedding** using Gemini API (converts text → 768-dimensional vector)
+3. **Store in Qdrant** with rich metadata:
+   ```python
+   point = PointStruct(
+       id=point_id,
+       vector=embedding_resp["embedding"],  # 768-dimensional vector
+       payload={
+           "pillar": pillar_text,          # Which narrative pillar
+           "content": content[:500],        # First 500 chars
+           "title": result.get("title"),
+           "url": result.get("url"),        # Source URL
+           "search_intent": intent,         # confirming/adversarial/contextual/consensus
+           "query": result.get("query"),
+           "score": result.get("score")
+       }
+   )
+   ```
 
-- **Position Evolution Handling**: For `position_evolution` claims, finding both old and new positions is expected
-  ```python
-  if claim_type == "position_evolution" or is_change:
-      # Adversarial evidence of OLD position validates the change story
-      if confirming_urls and adversarial_urls:
-          return []  # No conflict - this validates the change
-  ```
+**Result**: ~180 vectors stored in the database, each representing a search result with its semantic meaning and metadata.
 
-- **Smart Classification**: Conflict classifier uses semantic metadata to distinguish:
-  - `factual_contradiction`: Mutually exclusive facts about same event
-  - `position_evolution`: Entity changed stance (both old and new can be true)
+---
+
+#### Step 3: Detect Conflicts (`detect_conflicts`)
+
+For each narrative pillar:
+
+**3.1 Embed the Pillar**
+```python
+pillar_text = pillar.get('text')
+embedding_resp = self.gemini.generate_embedding(pillar_text)
+# Returns 768-dimensional vector representing pillar's semantic meaning
+```
+
+**3.2 Query Qdrant for Similar Content**
+```python
+search_results = self.qdrant.query_points(
+    collection_name=self.collection_name,
+    query=embedding_resp["embedding"],
+    limit=20,
+    score_threshold=0.85  # 85% similarity required
+).points
+```
+- Finds top 20 most semantically similar search results
+- Only includes results with >85% similarity
+- Returns search results that discuss the same topic/claim
+
+**3.3 Group by Search Intent and Deduplicate by URL**
+```python
+confirming_urls = {}  # Evidence supporting the claim
+adversarial_urls = {} # Evidence contradicting the claim
+
+for hit in search_results:
+    url = hit.payload.get("url")
+    intent = hit.payload.get("search_intent")
+    
+    if intent == "confirming" and url not in confirming_urls:
+        confirming_urls[url] = hit
+    elif intent == "adversarial" and url not in adversarial_urls:
+        adversarial_urls[url] = hit
+```
+- Groups semantically similar results by their search intent
+- Deduplicates: same URL can't appear twice in one category
+
+**3.4 Special Handling for Position Evolution** (Critical Innovation)
+```python
+if claim_type == "position_evolution" or is_change:
+    # For change narratives, having BOTH old and new positions is EXPECTED
+    if confirming_urls and adversarial_urls:
+        return []  # No conflict - this VALIDATES the change!
+```
+
+**Why this matters**: For a claim like "Zelensky shifted from demanding full territorial integrity to proposing a DMZ":
+- **Confirming searches** find evidence of the NEW position (DMZ proposal)
+- **Adversarial searches** find evidence of the OLD position (territorial integrity)
+- Finding BOTH is **expected** and **validates** the change story
+- This is NOT a conflict—it's confirmation the evolution happened!
+
+**3.5 Remove Duplicate URLs Across Intents**
+```python
+duplicate_urls = set(confirming_urls.keys()) & set(adversarial_urls.keys())
+for url in duplicate_urls:
+    del adversarial_urls[url]  # Assume nuanced coverage, not contradiction
+```
+- If same source appears in both confirming and adversarial
+- Removes from adversarial (assumes the source discusses both positions, not contradicting)
+
+**3.6 Flag Genuine Conflicts**
+```python
+if confirming and adversarial:
+    conflict = {
+        "pillar": pillar_text[:100],
+        "conflict_type": "opposing_evidence",
+        "supporting_count": len(confirming),
+        "opposing_count": len(adversarial),
+        "supporting_sources": [url for url in confirming_urls][:5],
+        "opposing_sources": [url for url in adversarial_urls][:5]
+    }
+```
+- Only flags conflict if we have BOTH confirming AND adversarial evidence
+- After all deduplication and position_evolution handling
+- Returns supporting/opposing source counts and URLs
+
+---
+
+#### Step 4: Classify Conflict Type (`classify_conflict_type`)
+
+Uses Gemini LLM with semantic metadata to classify each detected conflict:
+
+**4.1 Conflict Classification** (ENHANCED with Semantic Metadata)
+**4.1 Conflict Types**
+
+Three categories distinguish different kinds of narrative conflicts:
+
+**A) factual_contradiction**
+- Mutually exclusive facts about the SAME event/timeframe
+- Example: "Treaty signed March 15" vs "Treaty signed March 20"
+- One source must be wrong
+- **Interpretation**: Undermines credibility
+
+**B) position_evolution**
+- Entity changed position/policy over time
+- Example: Historical stance X vs new/current stance Y
+- BOTH can be true if temporally separated
+- Key indicators: "shifted from", "previously supported", "now proposes"
+- **Critical insight**: Finding historical evidence that contradicts current claim VALIDATES a change story
+- **Interpretation**: Normal evolution, not a factual error
+
+**C) source_disagreement**
+- Competing claims about same timeframe
+- Neither is clearly historical vs current
+- Requires evaluating source credibility
+- **Interpretation**: Assess which sources are more authoritative
+
+**4.2 Classification Process**
+
+The classifier uses Gemini LLM with semantic metadata from Layer 1:
+
+```python
+def classify_conflict_type(self, pillar: Dict[str, Any], conflict: Dict[str, Any]) -> Dict[str, str]:
+    pillar_text = pillar.get('text')
+    claim_type = pillar.get('claim_type', 'unknown')
+    change_indicators = pillar.get('change_indicators', {})
+    temporal_frame = pillar.get('temporal_frame')
+    
+    semantic_context = f"""
+    SEMANTIC METADATA:
+    - Claim Type: {claim_type}
+    - Has Temporal Shift: {change_indicators.get('has_temporal_shift', False)}
+    - Change Verbs: {change_indicators.get('change_verbs', [])}
+    - Temporal Markers: {change_indicators.get('temporal_markers', [])}
+    - Old Position: {temporal_frame.get('old_position') if temporal_frame else 'N/A'}
+    - New Position: {temporal_frame.get('new_position') if temporal_frame else 'N/A'}
+    """
+    
+    prompt = f"""Classify this narrative conflict.
+    
+    NARRATIVE CLAIM: {pillar_text}
+    {semantic_context}
+    
+    EVIDENCE CONFLICT:
+    - {conflict['supporting_count']} sources support this claim
+    - {conflict['opposing_count']} sources contradict this claim
+    
+    CRITICAL RULES:
+    1. If claim_type='position_evolution', classify as B unless clearly impossible
+    2. If change verbs (shift, reverse, abandon) present, classify as B
+    3. If temporal_frame shows old→new transition, classify as B
+    4. Only use A for truly contradictory facts about same event
+    
+    Return JSON: {{"classification": "factual_contradiction|position_evolution|source_disagreement", 
+                  "reasoning": "2-3 sentence explanation"}}
+    """
+    
+    return self.gemini.generate_json(prompt, temperature=0.1)
+```
+
+**Inputs**:
+- Pillar text
+- Semantic metadata (claim_type, change_indicators, temporal_frame)
+- Conflict evidence (supporting/opposing counts)
+
+**Outputs**:
+- `classification`: One of the three types
+- `reasoning`: Explanation for the classification
+
+**Usage in Layer 4**: Agents interpret conflicts differently based on classification:
+- `factual_contradiction` → Indicates low credibility
+- `position_evolution` → Historical contradiction validates the change narrative
+- `source_disagreement` → Requires source quality evaluation
+
+---
+
+#### Key Improvements (v1.1)
+
+**1. URL Deduplication**
+- Same source cannot appear in both supporting and opposing lists
+- Prevents confusion where one article is counted as both confirming and contradicting
+```python
+# Remove duplicate URLs across intent categories
+duplicate_urls = set(confirming_urls.keys()) & set(adversarial_urls.keys())
+for url in duplicate_urls:
+    del adversarial_urls[url]  # Assume nuanced, not contradictory
+```
+
+**2. Position Evolution Handling**
+- For `position_evolution` claims, finding both old and new positions is **expected** and **validates** the change story
+- System recognizes that "contradictory" evidence actually confirms the narrative evolution
+```python
+if claim_type == "position_evolution" or is_change:
+    # Adversarial evidence of OLD position validates the change story
+    if confirming_urls and adversarial_urls:
+        return []  # No conflict - this validates the change
+```
+
+**3. Smart Classification**
+- Conflict classifier uses semantic metadata to distinguish:
+  - `factual_contradiction`: Mutually exclusive facts about same event (undermines credibility)
+  - `position_evolution`: Entity changed stance over time (both old and new can be true)
   - `source_disagreement`: Competing claims requiring credibility evaluation
+- Uses explicit rules prioritizing position_evolution when change verbs present
+
+**4. Threshold-Based Detection**
+- Only flags high-similarity conflicts (>85% semantic similarity)
+- Ensures detected conflicts are genuinely about the same topic
+- Reduces false positives from tangentially related content
+
+---
+
+#### Why This Approach Works
+
+Traditional fact-checking struggles with:
+- **Context**: Can't distinguish between historical facts and current claims
+- **Nuance**: Treats any contradiction as an error
+- **Evolution**: Fails to recognize when change is the story itself
+
+The Semantic Judge solves this by:
+- **Understanding semantic meaning** through vector embeddings
+- **Preserving temporal context** from Layer 1 enrichment
+- **Recognizing narrative patterns** (change stories, contradictions, disagreements)
+- **Intelligent deduplication** to avoid double-counting sources
+
+**Result**: More accurate conflict detection that understands **narrative structure** and **temporal logic**, dramatically reducing false positives while catching genuine contradictions.
+
+**Omission Scoring** (TODO - Future Enhancement)
+- Compare consensus facts against article pillars
+- Calculate: `(missing_facts / total_consensus_facts)`
+- Flag when >50% omission rate
 
 **File**: `src/semantic_judge.py`
 
@@ -832,9 +1033,9 @@ Provide your assessment as JSON with keys: verdict, confidence, reasoning
 ### LLM Configuration
 
 **Temperature Settings**:
-- Pillar extraction: 0.7 (creative yet structured)
-- Initial verdicts: 0.7 (allows diverse perspectives)
-- Debate reconsideration: 0.5 (more focused, less variation)
+- Pillar extraction: 0.1 (deterministic, factual consistency)
+- Initial verdicts: 0.2 (diverse perspectives with reduced hallucinations)
+- Debate reconsideration: 0.2 (focused reasoning, minimal variation)
 
 **Timeout Settings**:
 - Pillar extraction: 60s
@@ -1242,6 +1443,17 @@ cli.py [--file <path>] [<text>] [--test-mode]
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2 | 2025-12-27 | Enhanced fabrication detection |
+| | | - Auditor requires primary source documentation for extraordinary claims |
+| | | - "Zero conflicts + zero primary sources" = fabrication detection |
+| | | - Circular reporting pattern recognition |
+| | | - Terminal output UX: Final verdict moved to end |
+| 1.1 | 2025-12-26 | Core accuracy improvements |
+| | | - Fixed semantic judge URL deduplication |
+| | | - Fixed position_evolution conflict handling |
+| | | - Standardized agent verdict labels |
+| | | - Added temporal context awareness |
+| | | - Enhanced evidence formatting |
 | 4.0.1 | 2025-12-25 | Test mode implementation |
 | | | - Added `--test-mode` flag for cost-effective testing |
 | | | - 97% reduction in Tavily API costs ($0.48 → $0.016) |
@@ -1287,15 +1499,15 @@ cli.py [--file <path>] [<text>] [--test-mode]
 - File: `src/gemini_client.py` (line 18)
 
 **Temperature Optimization**:
-- **Pillar Extraction**: 0.7 → 0.1
-  - Purpose: More deterministic extraction of factual claims
-  - File: `cli.py` (line 49)
-- **Conflict Classification**: 0.1 (new)
-  - Purpose: Consistent categorization of conflict types
-  - File: `src/semantic_judge.py` (classify_conflict_type method)
-- **Agent Debate**: 0.7 → 0.2
-  - Purpose: Reduce hallucinations while preserving reasoning diversity
-  - File: `src/consensus_protocol.py` (agent verdict generation)
+- **Pillar Extraction**: 0.1
+  - Purpose: Deterministic extraction of factual claims from articles
+  - File: `cli.py` (pillar extraction call)
+- **Conflict Classification**: 0.1
+  - Purpose: Consistent categorization of conflict types (factual_contradiction, position_evolution, source_disagreement)
+  - File: `src/semantic_judge.py` (classify_conflict_type method, line 301)
+- **Agent Debate**: 0.2
+  - Purpose: Reduce hallucinations while preserving reasoning diversity across three agents
+  - File: `src/consensus_protocol.py` (lines 137, 211)
 
 **Rationale**: Lower temperatures improve factual consistency in structured reasoning tasks while maintaining enough diversity for multi-agent debate.
 
