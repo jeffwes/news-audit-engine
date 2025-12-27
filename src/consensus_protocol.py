@@ -110,22 +110,22 @@ class ConsensusProtocol:
                 # Show other agents' verdicts
                 other_verdicts = [v for v in current_verdicts if v.get("agent_id") != agent_id]
                 other_views = "\n".join([
-                    f"{v.get('agent')}: {v.get('verdict')} (confidence: {v.get('confidence')}) - {v.get('reasoning')}"
+                    f"- {v.get('agent')}: {v.get('verdict')} ({v.get('confidence')*100:.0f}% confidence)\n  Reasoning: {v.get('reasoning')}"
                     for v in other_verdicts
                 ])
                 
                 # Ask agent to reconsider
                 debate_prompt = (
-                    f"You are {agent_config['name']}. You previously assessed the evidence as: "
-                    f"{current_verdict.get('verdict')} (confidence: {current_verdict.get('confidence')})\n\n"
-                    f"Other agents have provided these assessments:\n{other_views}\n\n"
-                    f"Given their perspectives, do you maintain your verdict or change it?\n\n"
-                    f"IMPORTANT: Your verdict MUST be exactly one of these labels:\n"
+                    f"You are {agent_config['name']}.\n\n"
+                    f"YOUR PREVIOUS VERDICT: {current_verdict.get('verdict')} (confidence: {current_verdict.get('confidence')*100:.0f}%)\n\n"
+                    f"OTHER AGENTS' CURRENT VERDICTS:\n{other_views}\n\n"
+                    f"Given their perspectives, what is your updated verdict?\n\n"
+                    f"Your verdict MUST be exactly one of these labels:\n"
                     f"- Accurate: Claims are well-supported and properly contextualized\n"
                     f"- Misleading: Claims contain factual errors or misleading framing\n"
                     f"- Biased: Claims show clear bias but facts are not necessarily wrong\n"
                     f"- Inconclusive: Evidence is insufficient to make a determination\n\n"
-                    f"Provide updated assessment as JSON with keys: verdict (must be one of the above), confidence (0.0-1.0), reasoning, changed (boolean)"
+                    f"Provide updated assessment as JSON with keys: verdict, confidence (0.0-1.0), reasoning"
                 )
                 
                 response = self.gemini.generate_json(
@@ -140,6 +140,12 @@ class ConsensusProtocol:
                     if isinstance(verdict, list):
                         print(f"Warning: Agent {agent_id} returned list, using first item")
                         verdict = verdict[0] if verdict else {}
+                    
+                    # Calculate if verdict changed programmatically
+                    old_verdict = self._normalize_verdict(current_verdict.get('verdict', ''))
+                    new_verdict = self._normalize_verdict(verdict.get('verdict', ''))
+                    verdict['changed'] = (old_verdict != new_verdict)
+                    
                     verdict["agent"] = agent_config["name"]
                     verdict["agent_id"] = agent_id
                     verdict["turn"] = turn + 1

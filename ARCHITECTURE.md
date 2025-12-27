@@ -1,8 +1,8 @@
 # News Audit Engine v4.0 - System Architecture
 
-**Document Version**: 1.3  
+**Document Version**: 1.4  
 **Last Updated**: December 27, 2025  
-**Status**: Production Ready - Validated on Multiple Article Types
+**Status**: Production Ready - Validated on Multiple Article Types (Scientific, Administrative Leaks, Timeline Coherence)
 
 ---
 
@@ -29,7 +29,52 @@ The News Audit Engine is a sophisticated narrative integrity analysis system tha
 
 **Design Philosophy**: Intellectual honesty over false precision. When evidence is contradictory, the system returns "Inconclusive" rather than a random guess. Agents are adversarial by design, each attacking different failure modes to prevent groupthink.
 
-### Recent Improvements (v1.3 - December 27, 2025)
+### Recent Improvements (v1.4 - December 27, 2025)
+
+1. **Three Categories of Misleading** - Clarified and expanded Misleading verdict criteria
+   - **Category 1: FABRICATION** - Completely fabricated event/claim with no credible sourcing
+   - **Category 2: EXPLICIT DENIAL** - Officials explicitly deny the claim
+   - **Category 3: MISREPRESENTATION** - Real studies/data exist but are presented misleadingly:
+     * Outlier study framed as scientific consensus
+     * Debunked/heavily criticized research presented as valid
+     * Cherry-picked evidence ignoring overwhelming contradictory findings from authoritative sources
+   - File: `prompts/agent_prompts.json`
+
+2. **Scientific Misrepresentation Detection** - Agents now evaluate consensus vs outlier studies
+   - For scientific/medical claims, agents assess whether article presents outlier research as mainstream
+   - If search results show OVERWHELMING contradictory evidence from authoritative sources (WHO, CDC, major medical journals, systematic reviews), verdict is Misleading
+   - A single study published in non-peer-reviewed or low-impact outlet contradicting global consensus is insufficient to avoid Misleading
+   - Study's existence as "physical artifact" does NOT prevent Misleading if article misrepresents its significance
+   - Files: `prompts/agent_prompts.json` (all three agents + Executive)
+
+3. **Administrative Leak Handling** - Proper treatment of unverified but credible leaks
+   - ADMINISTRATIVE/POLICY LEAKS: If article cites SPECIFIC whistleblowers (job titles, number of sources, dates, quotes, leaked documents) AND officials respond with "no comment" (NOT denial) → Inconclusive
+   - For administrative leaks, ABSENCE of Federal Register/official documentation is EXPECTED - that's what makes it a leak
+   - Agents instructed NOT to penalize leak stories for lacking primary .gov sources - the leak IS the story
+   - "No comment" response is NOT the same as denial - often indicates leak is accurate but unconfirmed
+   - Vague sourcing ("sources say"), contradictory details, OR explicit official denial → Misleading
+   - Files: `prompts/agent_prompts.json` (Auditor, Skeptic)
+
+4. **Scientific Misrepresentation Override** - Executive agent can override Inconclusive verdicts for scientific claims
+   - If agents vote Inconclusive but evidence shows: outlier/debunked study + overwhelming contradictory evidence from authoritative sources + article ignores contradictory evidence → Executive overrides to Misleading
+   - Study's existence does NOT prevent Misleading if article misrepresents its significance or credibility
+   - Scientific claims require consensus assessment - presenting discredited outlier research as valid is misrepresentation
+   - Leak policy applies to ADMINISTRATIVE/POLICY leaks, NOT scientific claims
+   - File: `prompts/agent_prompts.json` (Executive agent)
+
+5. **Programmatic Changed Tracking** - Eliminated LLM hallucinations about verdict changes
+   - System now programmatically calculates `changed` boolean by comparing old vs new normalized verdicts
+   - Removed complex "maintain vs changed" instructions that confused LLMs
+   - Debate prompt simplified to: "Given their perspectives, what is your updated verdict?"
+   - Agents no longer need to track or report whether they changed - system does it automatically
+   - File: `src/consensus_protocol.py` (conduct_debate method)
+
+**Validation Results**:
+- **Vaccines/NDDs outlier study**: Misleading (98% confidence, unanimous - correctly identified scientific misrepresentation)
+- **CDC VICP whistleblower leak**: Inconclusive (95% confidence, unanimous - correctly handled administrative leak)
+- **FDA Commissioner timeline paradox**: Misleading (99% confidence, unanimous - Contextualist caught temporal logic error)
+
+### Previous Improvements (v1.3 - December 27, 2025)
 
 1. **Adversarial Agent Architecture** - Agents transformed from collaborative to adversarial "prosecutors"
    - **The Auditor (Framing Prosecutor)**: Hunts manipulative framing, causality leaps, omitted qualifiers, narrative overreach
@@ -39,7 +84,7 @@ The News Audit Engine is a sophisticated narrative integrity analysis system tha
    - **The Skeptic (Source Prosecutor)**: Hunts circular reporting, missing primary docs, source tier issues
      * Required field: `source_quality` (strong|mixed|weak)
    - Each agent focuses on a specific failure mode to prevent unanimous false positives
-   - File: `prompts/agent_prompts.json`
+   - File: `prompts/agent_personas.json`
 
 2. **Executive Decision Agent (Layer 4.5)** - New reconciliation layer between agent debate and final output
    - Reconciles conflicts when agents disagree on verdict
